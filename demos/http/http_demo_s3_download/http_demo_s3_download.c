@@ -1031,6 +1031,7 @@ static bool downloadS3ObjectFile( const TransportInterface_t * pTransportInterfa
                                         serverHost,
                                         serverHostLength,
                                         pPath );
+    return true;
 
     if( fileSize < RANGE_REQUEST_LENGTH )
     {
@@ -1410,6 +1411,11 @@ static bool getS3ObjectFileSize( size_t * pFileSize,
         }
     }
 
+    LogInfo( ( "pSigv4Auth = \n%s", pSigv4Auth ) );
+
+    LogInfo( ( "Signature = %s", signature ) );
+    return returnStatus;
+
     /* Add the authorization header to the HTTP request headers. */
     if( returnStatus == true )
     {
@@ -1606,7 +1612,18 @@ int main( int argc,
         credentialResponse.pBuffer = pAwsIotHttpBuffer;
         credentialResponse.bufferLen = CREDENTIAL_BUFFER_LENGTH;
 
+#if 0
         credentialStatus = getTemporaryCredentials( &transportInterface, pDateISO8601, sizeof( pDateISO8601 ), &credentialResponse, &sigvCreds );
+#else
+        sigvCreds.pAccessKeyId = "ASIAVBKNXEL5KM7WKF5J";
+        sigvCreds.accessKeyIdLen = strlen(sigvCreds.pAccessKeyId);
+        sigvCreds.pSecretAccessKey = "S96+y1HoKqmKJV+M3rIaqHNiOJfez5Zw7/JKoOMn";
+        sigvCreds.secretAccessKeyLen = strlen(sigvCreds.pSecretAccessKey);
+        pSecurityToken = "IQoJb3JpZ2luX2VjENn//////////wEaDGV1LWNlbnRyYWwtMSJHMEUCID1N4fp5hf43SfExqAeR0TzAPNPqFN5BB602HNGQgayPAiEAoDmH1Qp9jQxkCw03aEQQgDnoz3wizi7G0YrrP8ZmbIQq5wMI0v//////////ARAAGgwzNDY0NDQ3MzUyMjYiDHcZJJt5/OOrYNMe5Sq7A0Ee9OnHTudb0VfrrPpDa+U4WA2gftulM0TcE5c3d/1CM18/K6RIP47XuG5eLKCWp2mnrs4584LPUB9p3JTzAb8+vqOZJddIgPq6UPo1lzXs8NaRu1AIUvmSeCZESYuzjz52uL0yMvREp+ndOfoesmn7h7ry1QeSvc30Wk48t7jVc/uZXTDrBBbk2oKzcsnFD09Z5XfTAZsCRF/FFxFsLYjpE9I1rreOXB9j43Jw4Sjboa6wb5EViFIlZhyht/qBsgF5yqNuRD/m5Y4z1s4nK9AyEzvclxr53FwrsAlYWD5LSq3QXpeJSuH6eJJcYiwEnPLLjG8XWlFUftzrci9eBa+HWjmN2MxJ87AY2++IMgh5PJlBB0rKAFCFtDMW5e+DWCf/s9HZHeXygXpfk3HW1Z41t24PiJJH0+/8v67bnMmSORb0YZ/qr81mnAbh/CXwyfKVCPDuMLr5prnCE7JRh0MldmS2QT+KHFJBWXsZno1X1Js86zIQO1wOhTYa6vQ6mX3TuPB+ugy/Ihb11a54Fk8snbUc8kVBrr7l/85XPWVap17X8Zz4WQloM+TsUaATFg0Bqa3qoXR+OzgDMKy/36gGOpoBOewB/N92nslpmeMPCK0G8FjdXDsRMGhPjDIbJkfMngM9y/ZNT+ahiQDY8iTUylxxlCec9FvQVs6i5X3vkDVY2pqnQ3L6JnnJ01LIikSMSzvOwuLAgEYin6cgvJ+k8VGNQta4xEFrCDgyZAS3mlyhZ2nqT0fcICwgd9c+gRObVMoonXvISE3CHPuRs5I+MCT1wsDy46rCBSIq6A==";
+        securityTokenLen = strlen(pSecurityToken);
+        memcpy(pDateISO8601, "20230930T084822Z", sizeof(pDateISO8601));
+        credentialStatus = true;
+#endif
 
         returnStatus = ( credentialStatus == true ) ? EXIT_SUCCESS : EXIT_FAILURE;
 
@@ -1621,6 +1638,7 @@ int main( int argc,
 
         if( returnStatus == EXIT_SUCCESS )
         {
+#if 0
             /* Attempt to connect to the AWS S3 Http server. If connection fails, retry
              * after a timeout. The timeout value will be exponentially
              * increased until either the maximum number of attempts or the
@@ -1637,7 +1655,7 @@ int main( int argc,
                 LogError( ( "Failed to connect to AWS S3 HTTP server %s.",
                             serverHost ) );
             }
-
+#endif
             /* Define the transport interface. */
             if( returnStatus == EXIT_SUCCESS )
             {
@@ -1656,6 +1674,7 @@ int main( int argc,
                 ret = downloadS3ObjectFile( &transportInterface,
                                             pPath );
                 returnStatus = ( ret == true ) ? EXIT_SUCCESS : EXIT_FAILURE;
+                break;
             }
 
             /************************** Disconnect. *****************************/
