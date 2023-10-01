@@ -1310,6 +1310,7 @@ static bool getS3ObjectFileSize( size_t * pFileSize,
     sha256( ( const char * ) S3_REQUEST_EMPTY_PAYLOAD, 0, pPayloadHashDigest );
     lowercaseHexEncode( ( const char * ) pPayloadHashDigest, SHA256_HASH_DIGEST_LENGTH, hexencoded );
 
+#if 0
     if( returnStatus == true )
     {
         /* Add the sigv4 required headers to the request. */
@@ -1376,10 +1377,30 @@ static bool getS3ObjectFileSize( size_t * pFileSize,
             returnStatus = false;
         }
     }
+#endif
 
     /* Move request header pointer past the initial headers which are added by coreHTTP
      * library and are not required by SigV4 library. */
     getHeaderStartLocFromHttpRequest( requestHeaders, &pHeaders, &headersLen );
+
+    // https://docs.aws.amazon.com/AmazonS3/latest/API/sigv4-query-string-auth.html
+    char canonical_queries[2048] = "";
+    strcat(canonical_queries, "X-Amz-Algorithm=");
+    strcat(canonical_queries, SIGV4_AWS4_HMAC_SHA256);
+    strcat(canonical_queries, "&X-Amz-Credential=");
+    // <your-access-key-id>/<date>/<AWS Region>/<AWS-service>/aws4_request
+    strcat(canonical_queries, sigvCreds.pAccessKeyId);
+    strcat(canonical_queries, "/");
+    strncat(canonical_queries, pDateISO8601, 8);
+    strcat(canonical_queries, "/");
+    strcat(canonical_queries, AWS_S3_BUCKET_REGION);
+    strcat(canonical_queries, "/s3/aws4_request");
+    strcat(canonical_queries, "&X-Amz-Date=");
+    strcat(canonical_queries, pDateISO8601);
+    strcat(canonical_queries, "&X-Amz-Expires=3600");
+    strcat(canonical_queries, "&X-Amz-Security-Token=");
+    strcat(canonical_queries, pSecurityToken);
+    strcat(canonical_queries, "&X-Amz-SignedHeaders=host");
 
     /* Setup the HTTP parameters. */
     sigv4HttpParams.pHttpMethod = requestInfo.pMethod;
@@ -1389,8 +1410,8 @@ static bool getS3ObjectFileSize( size_t * pFileSize,
     sigv4HttpParams.pPath = requestInfo.pPath;
     sigv4HttpParams.pathLen = requestInfo.pathLen;
     /* AWS S3 request does not require any Query parameters. */
-    sigv4HttpParams.pQuery = NULL;
-    sigv4HttpParams.queryLen = 0;
+    sigv4HttpParams.pQuery = canonical_queries;
+    sigv4HttpParams.queryLen = strlen(canonical_queries);
     sigv4HttpParams.pHeaders = pHeaders;
     sigv4HttpParams.headersLen = headersLen;
     sigv4HttpParams.pPayload = S3_REQUEST_EMPTY_PAYLOAD;
