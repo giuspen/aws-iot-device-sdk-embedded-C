@@ -57,7 +57,7 @@
  * @brief The size of the compile time allocated internal library buffer that is used
  * for generating the canonical request.
  */
-#define SIGV4_PROCESSING_BUFFER_LENGTH    1600U
+#define SIGV4_PROCESSING_BUFFER_LENGTH    3200U
 
 /**
  * @brief Number of HTTP headers does not exceed a maximum of 10 in HTTP requests sent to S3

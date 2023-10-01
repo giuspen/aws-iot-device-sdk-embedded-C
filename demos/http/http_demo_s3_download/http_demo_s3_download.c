@@ -378,16 +378,6 @@ struct NetworkContext
 static int32_t connectToIotServer( NetworkContext_t * pNetworkContext );
 
 /**
- * @brief Connect to HTTP AWS S3 server with reconnection retries.
- *
- * @param[out] pNetworkContext The output parameter to return the created
- * network context.
- *
- * @return EXIT_FAILURE on failure; EXIT_SUCCESS on successful connection.
- */
-static int32_t connectToS3Server( NetworkContext_t * pNetworkContext );
-
-/**
  * @brief Send multiple HTTP GET requests, based on a specified path, to
  * download a file in chunks from the host S3 server.
  *
@@ -1032,204 +1022,6 @@ static bool downloadS3ObjectFile( const TransportInterface_t * pTransportInterfa
                                         serverHostLength,
                                         pPath );
     return true;
-
-    if( fileSize < RANGE_REQUEST_LENGTH )
-    {
-        numReqBytes = fileSize;
-    }
-    else
-    {
-        numReqBytes = RANGE_REQUEST_LENGTH;
-    }
-
-    /* Here we iterate sending byte range requests until the full file has been
-     * downloaded. We keep track of the next byte to download with curByte. When
-     * this reaches the fileSize we stop downloading. */
-    while( ( returnStatus == true ) && ( httpStatus == HTTPSuccess ) && ( curByte < fileSize ) )
-    {
-        httpStatus = HTTPClient_InitializeRequestHeaders( &requestHeaders,
-                                                          &requestInfo );
-
-        if( returnStatus == true )
-        {
-            /* Add the X-AMZ-DATE required headers to the request. */
-            httpStatus = HTTPClient_AddHeader( &requestHeaders,
-                                               ( const char * ) SIGV4_HTTP_X_AMZ_DATE_HEADER,
-                                               ( size_t ) sizeof( SIGV4_HTTP_X_AMZ_DATE_HEADER ) - 1,
-                                               ( const char * ) pDateISO8601,
-                                               SIGV4_ISO_STRING_LEN );
-
-            if( httpStatus != HTTPSuccess )
-            {
-                LogError( ( "Failed to add X-AMZ-DATE to request headers: Error=%s.",
-                            HTTPClient_strerror( httpStatus ) ) );
-                returnStatus = false;
-            }
-        }
-
-        if( returnStatus == true )
-        {
-            /* S3 requires the security token as part of the canonical headers. */
-            httpStatus = HTTPClient_AddHeader( &requestHeaders,
-                                               ( const char * ) SIGV4_HTTP_X_AMZ_SECURITY_TOKEN_HEADER,
-                                               ( size_t ) ( sizeof( SIGV4_HTTP_X_AMZ_SECURITY_TOKEN_HEADER ) - 1 ),
-                                               ( const char * ) pSecurityToken,
-                                               ( size_t ) securityTokenLen );
-
-            if( httpStatus != HTTPSuccess )
-            {
-                LogError( ( "Failed to add X-AMZ-SECURITY-TOKEN to request headers: Error=%s.",
-                            HTTPClient_strerror( httpStatus ) ) );
-                returnStatus = false;
-            }
-        }
-
-        if( httpStatus == HTTPSuccess )
-        {
-            httpStatus = HTTPClient_AddRangeHeader( &requestHeaders,
-                                                    curByte,
-                                                    curByte + numReqBytes - 1 );
-        }
-        else
-        {
-            LogError( ( "Failed to add range header to request headers: Error=%s.",
-                        HTTPClient_strerror( httpStatus ) ) );
-        }
-
-        /* Get the hash of the payload. */
-        sha256( ( const char * ) S3_REQUEST_EMPTY_PAYLOAD, 0, pPayloadHashDigest );
-        lowercaseHexEncode( ( const char * ) pPayloadHashDigest, SHA256_HASH_DIGEST_LENGTH, hexencoded );
-
-        if( returnStatus == true )
-        {
-            httpStatus = HTTPClient_AddHeader( &requestHeaders,
-                                               ( const char * ) SIGV4_HTTP_X_AMZ_CONTENT_SHA256_HEADER,
-                                               ( size_t ) ( sizeof( SIGV4_HTTP_X_AMZ_CONTENT_SHA256_HEADER ) - 1 ),
-                                               ( const char * ) hexencoded,
-                                               64 );
-
-            if( httpStatus != HTTPSuccess )
-            {
-                LogError( ( "Failed to add X-AMZ-CONTENT-SHA256-HEADER to request headers: Error=%s.",
-                            HTTPClient_strerror( httpStatus ) ) );
-                returnStatus = false;
-            }
-        }
-
-        /* Move request header pointer past the initial headers which are added by coreHTTP
-         * library and are not required by SigV4 library. */
-        getHeaderStartLocFromHttpRequest( requestHeaders, &pHeaders, &headersLen );
-
-        /* Setup the HTTP parameters. */
-        sigv4HttpParams.pHttpMethod = requestInfo.pMethod;
-        sigv4HttpParams.httpMethodLen = requestInfo.methodLen;
-        /* None of the requests parameters below are pre-canonicalized */
-        sigv4HttpParams.flags = 0;
-        sigv4HttpParams.pPath = requestInfo.pPath;
-        sigv4HttpParams.pathLen = requestInfo.pathLen;
-        /* AWS S3 request does not require any Query parameters. */
-        sigv4HttpParams.pQuery = NULL;
-        sigv4HttpParams.queryLen = 0;
-        sigv4HttpParams.pHeaders = pHeaders;
-        sigv4HttpParams.headersLen = headersLen;
-        sigv4HttpParams.pPayload = S3_REQUEST_EMPTY_PAYLOAD;
-        sigv4HttpParams.payloadLen = sizeof( S3_REQUEST_EMPTY_PAYLOAD ) - 1U;
-
-        /* Initializing sigv4Params with Http parameters required for the HTTP request. */
-        sigv4Params.pHttpParameters = &sigv4HttpParams;
-
-        if( returnStatus == true )
-        {
-            /* Generate HTTP Authorization header using SigV4_GenerateHTTPAuthorization API. */
-            sigv4Status = SigV4_GenerateHTTPAuthorization( &sigv4Params, pSigv4Auth, &sigv4AuthLen, &signature, &signatureLen );
-
-            if( sigv4Status != SigV4Success )
-            {
-                LogError( ( "SigV4 Library Failed to generate AUTHORIZATION Header." ) );
-                returnStatus = false;
-            }
-        }
-
-        /* Add the authorization header to the HTTP request headers. */
-        if( returnStatus == true )
-        {
-            httpStatus = HTTPClient_AddHeader( &requestHeaders,
-                                               ( const char * ) SIGV4_AUTH_HEADER_FIELD_NAME,
-                                               ( size_t ) sizeof( SIGV4_AUTH_HEADER_FIELD_NAME ) - 1,
-                                               ( const char * ) pSigv4Auth,
-                                               ( size_t ) sigv4AuthLen );
-
-            if( httpStatus != HTTPSuccess )
-            {
-                LogError( ( "Failed to add AUTHORIZATION Header to request headers: Error=%s.",
-                            HTTPClient_strerror( httpStatus ) ) );
-                returnStatus = false;
-            }
-        }
-
-        if( httpStatus == HTTPSuccess )
-        {
-            LogInfo( ( "Downloading bytes %d-%d, out of %d total bytes, from %s...:  ",
-                       ( int32_t ) ( curByte ),
-                       ( int32_t ) ( curByte + numReqBytes - 1 ),
-                       ( int32_t ) fileSize,
-                       serverHost ) );
-            LogDebug( ( "Request Headers:\n%.*s",
-                        ( int32_t ) requestHeaders.headersLen,
-                        ( char * ) requestHeaders.pBuffer ) );
-
-            /* Send HTTP Get request to AWS S3 and receive response. */
-            httpStatus = HTTPClient_Send( pTransportInterface,
-                                          &requestHeaders,
-                                          NULL,
-                                          0,
-                                          &response,
-                                          0 );
-        }
-        else
-        {
-            LogError( ( "Failed to add Range header to request headers: Error=%s.",
-                        HTTPClient_strerror( httpStatus ) ) );
-        }
-
-        if( httpStatus == HTTPSuccess )
-        {
-            LogDebug( ( "Received HTTP response from %s%s...",
-                        serverHost, pPath ) );
-            LogDebug( ( "Response Headers:\n%.*s",
-                        ( int32_t ) response.headersLen,
-                        response.pHeaders ) );
-            LogInfo( ( "Response Body:\n%.*s\n",
-                       ( int32_t ) response.bodyLen,
-                       response.pBody ) );
-
-            /* We increment by the content length because the server may not
-             * have sent us the range we request. */
-            curByte += response.contentLength;
-
-            if( ( fileSize - curByte ) < numReqBytes )
-            {
-                numReqBytes = fileSize - curByte;
-            }
-
-            returnStatus = ( response.statusCode == HTTP_STATUS_CODE_PARTIAL_CONTENT ) ? true : false;
-        }
-        else
-        {
-            LogError( ( "An error occured in downloading the file. "
-                        "Failed to send HTTP GET request to %s%s: Error=%s.",
-                        serverHost, pPath, HTTPClient_strerror( httpStatus ) ) );
-        }
-
-        if( returnStatus != true )
-        {
-            LogError( ( "Received an invalid response from the server "
-                        "(Status Code: %u).",
-                        response.statusCode ) );
-        }
-    }
-
-    return( ( returnStatus == true ) && ( httpStatus == HTTPSuccess ) );
 }
 
 /*-----------------------------------------------------------*/
@@ -1294,7 +1086,7 @@ static bool getS3ObjectFileSize( size_t * pFileSize,
     response.pBuffer = userBuffer;
     response.bufferLen = USER_BUFFER_LENGTH;
 
-    LogInfo( ( "Getting file object size from host..." ) );
+    LogInfo( ( "Getting presigned URL..." ) );
 
     httpStatus = HTTPClient_InitializeRequestHeaders( &requestHeaders,
                                                       &requestInfo );
@@ -1305,79 +1097,6 @@ static bool getS3ObjectFileSize( size_t * pFileSize,
                     HTTPClient_strerror( httpStatus ) ) );
         returnStatus = false;
     }
-#if 0
-    /* Get the hash of the payload. */
-    sha256( ( const char * ) S3_REQUEST_EMPTY_PAYLOAD, 0, pPayloadHashDigest );
-    lowercaseHexEncode( ( const char * ) pPayloadHashDigest, SHA256_HASH_DIGEST_LENGTH, hexencoded );
-
-
-    if( returnStatus == true )
-    {
-        /* Add the sigv4 required headers to the request. */
-        httpStatus = HTTPClient_AddHeader( &requestHeaders,
-                                           ( const char * ) SIGV4_HTTP_X_AMZ_DATE_HEADER,
-                                           ( size_t ) sizeof( SIGV4_HTTP_X_AMZ_DATE_HEADER ) - 1,
-                                           ( const char * ) pDateISO8601,
-                                           SIGV4_ISO_STRING_LEN );
-
-        if( httpStatus != HTTPSuccess )
-        {
-            LogError( ( "Failed to add X-AMZ-DATE to request headers: Error=%s.",
-                        HTTPClient_strerror( httpStatus ) ) );
-            returnStatus = false;
-        }
-    }
-
-    if( returnStatus == true )
-    {
-        /* S3 requires the security token as part of the canonical headers. IoT for example
-         * does not; it is added as part of the path. */
-        httpStatus = HTTPClient_AddHeader( &requestHeaders,
-                                           ( const char * ) SIGV4_HTTP_X_AMZ_SECURITY_TOKEN_HEADER,
-                                           ( size_t ) ( sizeof( SIGV4_HTTP_X_AMZ_SECURITY_TOKEN_HEADER ) - 1 ),
-                                           ( const char * ) pSecurityToken,
-                                           ( size_t ) securityTokenLen );
-
-        if( httpStatus != HTTPSuccess )
-        {
-            LogError( ( "Failed to add X-AMZ-SECURITY-TOKEN to request headers: Error=%s.",
-                        HTTPClient_strerror( httpStatus ) ) );
-            returnStatus = false;
-        }
-    }
-
-    if( returnStatus == true )
-    {
-        /* Add the header to get bytes=0-0. S3 will respond with a Content-Range
-         * header that contains the size of the file in it. This header will
-         * look like: "Content-Range: bytes 0-0/FILESIZE". The body will have a
-         * single byte that we are ignoring. */
-        httpStatus = HTTPClient_AddRangeHeader( &requestHeaders, 0, 0 );
-
-        if( httpStatus != HTTPSuccess )
-        {
-            LogError( ( "Failed to add Range header to request headers: Error=%s.",
-                        HTTPClient_strerror( httpStatus ) ) );
-            returnStatus = false;
-        }
-    }
-
-    if( returnStatus == true )
-    {
-        httpStatus = HTTPClient_AddHeader( &requestHeaders,
-                                           ( const char * ) SIGV4_HTTP_X_AMZ_CONTENT_SHA256_HEADER,
-                                           ( size_t ) ( sizeof( SIGV4_HTTP_X_AMZ_CONTENT_SHA256_HEADER ) - 1 ),
-                                           ( const char * ) hexencoded,
-                                           64 );
-
-        if( httpStatus != HTTPSuccess )
-        {
-            LogError( ( "Failed to add X-AMZ-CONTENT-SHA256-HEADER to request headers: Error=%s.",
-                        HTTPClient_strerror( httpStatus ) ) );
-            returnStatus = false;
-        }
-    }
-#endif
 
     /* Move request header pointer past the initial headers which are added by coreHTTP
      * library and are not required by SigV4 library. */
@@ -1432,114 +1151,6 @@ static bool getS3ObjectFileSize( size_t * pFileSize,
     }
 
     LogInfo( ( "pSigv4Auth = \n%s", pSigv4Auth ) );
-
-    return returnStatus;
-
-    /* Add the authorization header to the HTTP request headers. */
-    if( returnStatus == true )
-    {
-        httpStatus = HTTPClient_AddHeader( &requestHeaders,
-                                           ( const char * ) SIGV4_AUTH_HEADER_FIELD_NAME,
-                                           ( size_t ) sizeof( SIGV4_AUTH_HEADER_FIELD_NAME ) - 1,
-                                           ( const char * ) pSigv4Auth,
-                                           ( size_t ) sigv4AuthLen );
-
-        if( httpStatus != HTTPSuccess )
-        {
-            LogError( ( "Failed to send HTTP GET request to %s%s: Error=%s.",
-                        pHost, pPath, HTTPClient_strerror( httpStatus ) ) );
-            returnStatus = false;
-        }
-    }
-
-    if( returnStatus == true )
-    {
-        /* Send HTTP Get request to AWS S3 to get the file size. */
-        httpStatus = HTTPClient_Send( pTransportInterface,
-                                      &requestHeaders,
-                                      NULL,
-                                      0,
-                                      &response,
-                                      0 );
-
-        if( httpStatus != HTTPSuccess )
-        {
-            LogError( ( "Failed to send HTTP GET request to %s%s: Error=%s.",
-                        pHost, pPath, HTTPClient_strerror( httpStatus ) ) );
-            returnStatus = false;
-        }
-    }
-
-    if( returnStatus == true )
-    {
-        LogDebug( ( "Received HTTP response from %s%s...",
-                    pHost, pPath ) );
-        LogDebug( ( "Response Headers:\n%.*s",
-                    ( int32_t ) response.headersLen,
-                    response.pHeaders ) );
-        LogDebug( ( "Response Body:\n%.*s\n",
-                    ( int32_t ) response.bodyLen,
-                    response.pBody ) );
-
-        if( response.statusCode != HTTP_STATUS_CODE_PARTIAL_CONTENT )
-        {
-            LogError( ( "Received an invalid response from the server "
-                        "(Status Code: %u).",
-                        response.statusCode ) );
-            returnStatus = false;
-        }
-    }
-
-    if( returnStatus == true )
-    {
-        LogInfo( ( "Received successful response from server "
-                   "(Status Code: %u).",
-                   response.statusCode ) );
-
-        httpStatus = HTTPClient_ReadHeader( &response,
-                                            ( char * ) HTTP_CONTENT_RANGE_HEADER_FIELD,
-                                            ( size_t ) HTTP_CONTENT_RANGE_HEADER_FIELD_LENGTH,
-                                            ( const char ** ) &contentRangeValStr,
-                                            &contentRangeValStrLength );
-
-        if( httpStatus != HTTPSuccess )
-        {
-            LogError( ( "Failed to read Content-Range header from HTTP response: Error=%s.",
-                        HTTPClient_strerror( httpStatus ) ) );
-            returnStatus = false;
-        }
-    }
-
-    /* Parse the Content-Range header value to get the file size. */
-    if( returnStatus == true )
-    {
-        pFileSizeStr = strstr( contentRangeValStr, "/" );
-
-        if( pFileSizeStr == NULL )
-        {
-            LogError( ( "'/' not present in Content-Range header value: %s.",
-                        contentRangeValStr ) );
-            returnStatus = false;
-        }
-    }
-
-    if( returnStatus == true )
-    {
-        pFileSizeStr += sizeof( char );
-        *pFileSize = ( size_t ) strtoul( pFileSizeStr, NULL, 10 );
-
-        if( ( *pFileSize == 0 ) || ( *pFileSize == UINT32_MAX ) )
-        {
-            LogError( ( "Error using strtoul to get the file size from %s: fileSize=%d.",
-                        pFileSizeStr, ( int32_t ) *pFileSize ) );
-            returnStatus = false;
-        }
-    }
-
-    if( returnStatus == true )
-    {
-        LogInfo( ( "The file is %d bytes long.", ( int32_t ) *pFileSize ) );
-    }
 
     return returnStatus;
 }
@@ -1631,7 +1242,7 @@ int main( int argc,
         credentialResponse.pBuffer = pAwsIotHttpBuffer;
         credentialResponse.bufferLen = CREDENTIAL_BUFFER_LENGTH;
 
-#if 0
+#if 1
         credentialStatus = getTemporaryCredentials( &transportInterface, pDateISO8601, sizeof( pDateISO8601 ), &credentialResponse, &sigvCreds );
 #else
         sigvCreds.pAccessKeyId = "ASIAVBKNXEL5KM7WKF5J";
@@ -1657,28 +1268,11 @@ int main( int argc,
 
         if( returnStatus == EXIT_SUCCESS )
         {
-#if 0
-            /* Attempt to connect to the AWS S3 Http server. If connection fails, retry
-             * after a timeout. The timeout value will be exponentially
-             * increased until either the maximum number of attempts or the
-             * maximum timeout value is reached. The function returns
-             * EXIT_FAILURE if the TCP connection cannot be established to the
-             * broker after the configured number of attempts. */
-            returnStatus = connectToServerWithBackoffRetries( connectToS3Server,
-                                                              &networkContext );
 
-            if( returnStatus == EXIT_FAILURE )
-            {
-                /* Log an error to indicate connection failure after all
-                 * reconnect attempts are over. */
-                LogError( ( "Failed to connect to AWS S3 HTTP server %s.",
-                            serverHost ) );
-            }
-#else
             serverHostLength = strlen( AWS_S3_ENDPOINT );
             memcpy( serverHost, AWS_S3_ENDPOINT, serverHostLength );
             serverHost[ serverHostLength ] = '\0';
-#endif
+
             /* Define the transport interface. */
             if( returnStatus == EXIT_SUCCESS )
             {
