@@ -73,11 +73,6 @@
     #define USER_BUFFER_LENGTH    ( 4096 )
 #endif
 
-/* Check that size of the file download buffer is defined. */
-#ifndef FILE_BUFFER_LENGTH
-    #define FILE_BUFFER_LENGTH    ( 2048 )
-#endif
-
 /* Check that AWS IOT Thing Name is defined. */
 #ifndef AWS_IOT_THING_NAME
     #error "Please define the AWS_IOT_THING_NAME macro in demo_config.h."
@@ -112,21 +107,6 @@
  * @brief The length of the HTTP GET method.
  */
 #define HTTP_METHOD_GET_LENGTH                    ( sizeof( HTTP_METHOD_GET ) - 1 )
-
-/**
- * @brief Field name of the HTTP Range header to read from server response.
- */
-#define HTTP_CONTENT_RANGE_HEADER_FIELD           "Content-Range"
-
-/**
- * @brief Length of the HTTP Range header field.
- */
-#define HTTP_CONTENT_RANGE_HEADER_FIELD_LENGTH    ( sizeof( HTTP_CONTENT_RANGE_HEADER_FIELD ) - 1 )
-
-/**
- * @brief HTTP status code returned for partial content.
- */
-#define HTTP_STATUS_CODE_PARTIAL_CONTENT          206
 
 /**
  * @brief The maximum number of times to run the loop in this demo.
@@ -188,11 +168,6 @@
  * @brief Field name of the HTTP date header to read from the AWS IOT credential provider server response.
  */
 #define AWS_IOT_CRED_PROVIDER_RESPONSE_DATE_HEADER    "date"
-
-/**
- * @brief Field name of the HTTP Authorization header to add to the request headers.
- */
-#define SIGV4_AUTH_HEADER_FIELD_NAME                  "Authorization"
 
 /**
  * @brief Length of AWS HTTP Authorization header value generated using SigV4 library.
@@ -319,11 +294,6 @@ static char pDateISO8601[ SIGV4_ISO_STRING_LEN ] = { 0 };
 static char pPayloadHashDigest[ SHA256_HASH_DIGEST_LENGTH ];
 
 /**
- * @brief Represents hex encoded hash digest of payload.
- */
-static char hexencoded[ HEX_ENCODED_SHA256_HASH_DIGEST_LENGTH ];
-
-/**
  * @brief Represents Authorization header value generated using SigV4 library.
  */
 static char pSigv4Auth[ AWS_HTTP_AUTH_HEADER_VALUE_LEN ];
@@ -442,17 +412,6 @@ static bool getTemporaryCredentials( TransportInterface_t * transportInterface,
                                      size_t pDateISO8601Len,
                                      HTTPResponse_t * response,
                                      SigV4Credentials_t * sigvCreds );
-
-/**
- * @brief Hex digest of provided string parameter.
- *
- * @param[in] pInputStr Input String to encode.
- * @param[in] inputStrLen Length of Input String to encode.
- * @param[out] pHexOutput Hex representation of @p pInputStr.
- */
-static void lowercaseHexEncode( const char * pInputStr,
-                                size_t inputStrLen,
-                                char * pHexOutput );
 
 /**
  * @brief Get the starting location of HTTP header in an HTTP request.
@@ -757,29 +716,6 @@ static JSONStatus_t parseCredentials( HTTPResponse_t * response,
 
 /*-----------------------------------------------------------*/
 
-static void lowercaseHexEncode( const char * pInputStr,
-                                size_t inputStrLen,
-                                char * pHexOutput )
-{
-    static const char digitArr[] = "0123456789abcdef";
-    char * hex = pHexOutput;
-    size_t i = 0U;
-
-    assert( pInputStr != NULL );
-    assert( inputStrLen > 0 );
-    assert( pHexOutput != NULL );
-
-    for( i = 0; i < inputStrLen; i++ )
-    {
-        *hex = digitArr[ ( pInputStr[ i ] & 0xF0 ) >> 4 ];
-        hex++;
-        *hex = digitArr[ ( pInputStr[ i ] & 0x0F ) ];
-        hex++;
-    }
-}
-
-/*-----------------------------------------------------------*/
-
 static int32_t sha256( const char * pInput,
                        size_t ilen,
                        char * pOutput )
@@ -891,57 +827,6 @@ static int32_t connectToIotServer( NetworkContext_t * pNetworkContext )
 
         /* Establish a TLS session with the HTTP server. This example connects
          * to the AWS_IOT_CREDENTIAL_PROVIDER_ENDPOINT and HTTPS_PORT in
-         * demo_config.h. */
-        LogInfo( ( "Establishing a TLS session with %s:%d.",
-                   serverHost,
-                   HTTPS_PORT ) );
-
-        opensslStatus = Openssl_Connect( pNetworkContext,
-                                         &serverInfo,
-                                         &opensslCredentials,
-                                         TRANSPORT_SEND_RECV_TIMEOUT_MS,
-                                         TRANSPORT_SEND_RECV_TIMEOUT_MS );
-
-        returnStatus = ( opensslStatus == OPENSSL_SUCCESS ) ? EXIT_SUCCESS : EXIT_FAILURE;
-    }
-
-    return returnStatus;
-}
-
-/*-----------------------------------------------------------*/
-
-static int32_t connectToS3Server( NetworkContext_t * pNetworkContext )
-{
-    int32_t returnStatus = EXIT_SUCCESS;
-    /* Variable to store Host Address of AWS S3 server. */
-    const char * pAddress = NULL;
-
-    /* Status returned by OpenSSL transport implementation. */
-    OpensslStatus_t opensslStatus;
-    /* Credentials to establish the TLS connection. */
-    OpensslCredentials_t opensslCredentials = { 0 };
-    /* Information about the server to send the HTTP requests. */
-    ServerInfo_t serverInfo = { 0 };
-
-    pAddress = AWS_S3_ENDPOINT;
-    serverHostLength = strlen( AWS_S3_ENDPOINT );
-
-    if( returnStatus == EXIT_SUCCESS )
-    {
-        memcpy( serverHost, pAddress, serverHostLength );
-        serverHost[ serverHostLength ] = '\0';
-
-        /* Initialize TLS credentials. */
-        opensslCredentials.pRootCaPath = ROOT_CA_CERT_PATH_S3;
-        opensslCredentials.sniHostName = serverHost;
-
-        /* Initialize server information. */
-        serverInfo.pHostName = serverHost;
-        serverInfo.hostNameLength = serverHostLength;
-        serverInfo.port = HTTPS_PORT;
-
-        /* Establish a TLS session with the HTTP server. This example connects
-         * to the HTTP AWS_S3_ENDPOINT and HTTPS_PORT in
          * demo_config.h. */
         LogInfo( ( "Establishing a TLS session with %s:%d.",
                    serverHost,
@@ -1103,7 +988,7 @@ static bool getS3ObjectFileSize( size_t * pFileSize,
     getHeaderStartLocFromHttpRequest( requestHeaders, &pHeaders, &headersLen );
 
     // https://docs.aws.amazon.com/AmazonS3/latest/API/sigv4-query-string-auth.html
-    char canonical_queries[2048] = "";
+    char canonical_queries[3000] = "";
     strcat(canonical_queries, "X-Amz-Algorithm=");
     strcat(canonical_queries, SIGV4_AWS4_HMAC_SHA256);
     strcat(canonical_queries, "&X-Amz-Credential=");
@@ -1120,6 +1005,8 @@ static bool getS3ObjectFileSize( size_t * pFileSize,
     strcat(canonical_queries, "&X-Amz-Security-Token=");
     strcat(canonical_queries, pSecurityToken);
     strcat(canonical_queries, "&X-Amz-SignedHeaders=host");
+
+    LogInfo( ( "canonical_queries (%zu) = \n%s", strlen(canonical_queries), canonical_queries ) );
 
     /* Setup the HTTP parameters. */
     sigv4HttpParams.pHttpMethod = requestInfo.pMethod;
@@ -1203,31 +1090,72 @@ int main( int argc,
     /* Set the pParams member of the network context with desired transport. */
     networkContext.pParams = &opensslParams;
 
-    LogInfo( ( "HTTP Client Synchronous S3 download demo using temporary credentials fetched from iot credential provider:\n%s",
+    LogInfo( ( "HTTP Client Presigned S3 URL demo using temporary credentials fetched from iot credential provider:\n%s",
                AWS_IOT_CREDENTIAL_PROVIDER_ENDPOINT ) );
 
-    do
+    /**************************** Connect. ******************************/
+
+    /* Establish TLS connection on top of TCP connection using OpenSSL. */
+
+    /* Attempt to connect to the AWS IOT CREDENTIAL PROVIDER server. If connection fails, retry
+     * after a timeout. The timeout value will be exponentially
+     * increased until either the maximum number of attempts or the
+     * maximum timeout value is reached. The function returns
+     * EXIT_FAILURE if the TCP connection cannot be established to the
+     * broker after the configured number of attempts. */
+    returnStatus = connectToServerWithBackoffRetries( connectToIotServer,
+                                                      &networkContext );
+
+    if( returnStatus == EXIT_FAILURE )
     {
-        /**************************** Connect. ******************************/
+        /* Log an error to indicate connection failure after all
+         * reconnect attempts are over. */
+        LogError( ( "Failed to connect to AWS IoT CREDENTIAL PROVIDER server %s.",
+                    serverHost ) );
+    }
 
-        /* Establish TLS connection on top of TCP connection using OpenSSL. */
+    /* Define the transport interface. */
+    if( returnStatus == EXIT_SUCCESS )
+    {
+        ( void ) memset( &transportInterface, 0, sizeof( transportInterface ) );
+        transportInterface.recv = Openssl_Recv;
+        transportInterface.send = Openssl_Send;
+        transportInterface.pNetworkContext = &networkContext;
+    }
 
-        /* Attempt to connect to the AWS IOT CREDENTIAL PROVIDER server. If connection fails, retry
-         * after a timeout. The timeout value will be exponentially
-         * increased until either the maximum number of attempts or the
-         * maximum timeout value is reached. The function returns
-         * EXIT_FAILURE if the TCP connection cannot be established to the
-         * broker after the configured number of attempts. */
-        returnStatus = connectToServerWithBackoffRetries( connectToIotServer,
-                                                          &networkContext );
+    /* Initialize response buffer. */
+    credentialResponse.pBuffer = pAwsIotHttpBuffer;
+    credentialResponse.bufferLen = CREDENTIAL_BUFFER_LENGTH;
 
-        if( returnStatus == EXIT_FAILURE )
-        {
-            /* Log an error to indicate connection failure after all
-             * reconnect attempts are over. */
-            LogError( ( "Failed to connect to AWS IoT CREDENTIAL PROVIDER server %s.",
-                        serverHost ) );
-        }
+#if 1
+    credentialStatus = getTemporaryCredentials( &transportInterface, pDateISO8601, sizeof( pDateISO8601 ), &credentialResponse, &sigvCreds );
+#else
+    sigvCreds.pAccessKeyId = "ASIAVBKNXEL5KM7WKF5J";
+    sigvCreds.accessKeyIdLen = strlen(sigvCreds.pAccessKeyId);
+    sigvCreds.pSecretAccessKey = "S96+y1HoKqmKJV+M3rIaqHNiOJfez5Zw7/JKoOMn";
+    sigvCreds.secretAccessKeyLen = strlen(sigvCreds.pSecretAccessKey);
+    pSecurityToken = "IQoJb3JpZ2luX2VjENn//////////wEaDGV1LWNlbnRyYWwtMSJHMEUCID1N4fp5hf43SfExqAeR0TzAPNPqFN5BB602HNGQgayPAiEAoDmH1Qp9jQxkCw03aEQQgDnoz3wizi7G0YrrP8ZmbIQq5wMI0v//////////ARAAGgwzNDY0NDQ3MzUyMjYiDHcZJJt5/OOrYNMe5Sq7A0Ee9OnHTudb0VfrrPpDa+U4WA2gftulM0TcE5c3d/1CM18/K6RIP47XuG5eLKCWp2mnrs4584LPUB9p3JTzAb8+vqOZJddIgPq6UPo1lzXs8NaRu1AIUvmSeCZESYuzjz52uL0yMvREp+ndOfoesmn7h7ry1QeSvc30Wk48t7jVc/uZXTDrBBbk2oKzcsnFD09Z5XfTAZsCRF/FFxFsLYjpE9I1rreOXB9j43Jw4Sjboa6wb5EViFIlZhyht/qBsgF5yqNuRD/m5Y4z1s4nK9AyEzvclxr53FwrsAlYWD5LSq3QXpeJSuH6eJJcYiwEnPLLjG8XWlFUftzrci9eBa+HWjmN2MxJ87AY2++IMgh5PJlBB0rKAFCFtDMW5e+DWCf/s9HZHeXygXpfk3HW1Z41t24PiJJH0+/8v67bnMmSORb0YZ/qr81mnAbh/CXwyfKVCPDuMLr5prnCE7JRh0MldmS2QT+KHFJBWXsZno1X1Js86zIQO1wOhTYa6vQ6mX3TuPB+ugy/Ihb11a54Fk8snbUc8kVBrr7l/85XPWVap17X8Zz4WQloM+TsUaATFg0Bqa3qoXR+OzgDMKy/36gGOpoBOewB/N92nslpmeMPCK0G8FjdXDsRMGhPjDIbJkfMngM9y/ZNT+ahiQDY8iTUylxxlCec9FvQVs6i5X3vkDVY2pqnQ3L6JnnJ01LIikSMSzvOwuLAgEYin6cgvJ+k8VGNQta4xEFrCDgyZAS3mlyhZ2nqT0fcICwgd9c+gRObVMoonXvISE3CHPuRs5I+MCT1wsDy46rCBSIq6A==";
+    securityTokenLen = strlen(pSecurityToken);
+    memcpy(pDateISO8601, "20230930T084822Z", sizeof(pDateISO8601));
+    credentialStatus = true;
+#endif
+
+    returnStatus = ( credentialStatus == true ) ? EXIT_SUCCESS : EXIT_FAILURE;
+
+    if( returnStatus == EXIT_FAILURE )
+    {
+        LogError( ( "Failed to get temporary credentials from AWS IoT CREDENTIALS PROVIDER %s.",
+                    serverHost ) );
+    }
+
+    /* End the TLS session, then close the TCP connection. */
+    ( void ) Openssl_Disconnect( &networkContext );
+
+    if( returnStatus == EXIT_SUCCESS )
+    {
+        serverHostLength = strlen( AWS_S3_ENDPOINT );
+        memcpy( serverHost, AWS_S3_ENDPOINT, serverHostLength );
+        serverHost[ serverHostLength ] = '\0';
 
         /* Define the transport interface. */
         if( returnStatus == EXIT_SUCCESS )
@@ -1238,90 +1166,17 @@ int main( int argc,
             transportInterface.pNetworkContext = &networkContext;
         }
 
-        /* Initialize response buffer. */
-        credentialResponse.pBuffer = pAwsIotHttpBuffer;
-        credentialResponse.bufferLen = CREDENTIAL_BUFFER_LENGTH;
+        /******************** Download S3 Object File. **********************/
 
-#if 1
-        credentialStatus = getTemporaryCredentials( &transportInterface, pDateISO8601, sizeof( pDateISO8601 ), &credentialResponse, &sigvCreds );
-#else
-        sigvCreds.pAccessKeyId = "ASIAVBKNXEL5KM7WKF5J";
-        sigvCreds.accessKeyIdLen = strlen(sigvCreds.pAccessKeyId);
-        sigvCreds.pSecretAccessKey = "S96+y1HoKqmKJV+M3rIaqHNiOJfez5Zw7/JKoOMn";
-        sigvCreds.secretAccessKeyLen = strlen(sigvCreds.pSecretAccessKey);
-        pSecurityToken = "IQoJb3JpZ2luX2VjENn//////////wEaDGV1LWNlbnRyYWwtMSJHMEUCID1N4fp5hf43SfExqAeR0TzAPNPqFN5BB602HNGQgayPAiEAoDmH1Qp9jQxkCw03aEQQgDnoz3wizi7G0YrrP8ZmbIQq5wMI0v//////////ARAAGgwzNDY0NDQ3MzUyMjYiDHcZJJt5/OOrYNMe5Sq7A0Ee9OnHTudb0VfrrPpDa+U4WA2gftulM0TcE5c3d/1CM18/K6RIP47XuG5eLKCWp2mnrs4584LPUB9p3JTzAb8+vqOZJddIgPq6UPo1lzXs8NaRu1AIUvmSeCZESYuzjz52uL0yMvREp+ndOfoesmn7h7ry1QeSvc30Wk48t7jVc/uZXTDrBBbk2oKzcsnFD09Z5XfTAZsCRF/FFxFsLYjpE9I1rreOXB9j43Jw4Sjboa6wb5EViFIlZhyht/qBsgF5yqNuRD/m5Y4z1s4nK9AyEzvclxr53FwrsAlYWD5LSq3QXpeJSuH6eJJcYiwEnPLLjG8XWlFUftzrci9eBa+HWjmN2MxJ87AY2++IMgh5PJlBB0rKAFCFtDMW5e+DWCf/s9HZHeXygXpfk3HW1Z41t24PiJJH0+/8v67bnMmSORb0YZ/qr81mnAbh/CXwyfKVCPDuMLr5prnCE7JRh0MldmS2QT+KHFJBWXsZno1X1Js86zIQO1wOhTYa6vQ6mX3TuPB+ugy/Ihb11a54Fk8snbUc8kVBrr7l/85XPWVap17X8Zz4WQloM+TsUaATFg0Bqa3qoXR+OzgDMKy/36gGOpoBOewB/N92nslpmeMPCK0G8FjdXDsRMGhPjDIbJkfMngM9y/ZNT+ahiQDY8iTUylxxlCec9FvQVs6i5X3vkDVY2pqnQ3L6JnnJ01LIikSMSzvOwuLAgEYin6cgvJ+k8VGNQta4xEFrCDgyZAS3mlyhZ2nqT0fcICwgd9c+gRObVMoonXvISE3CHPuRs5I+MCT1wsDy46rCBSIq6A==";
-        securityTokenLen = strlen(pSecurityToken);
-        memcpy(pDateISO8601, "20230930T084822Z", sizeof(pDateISO8601));
-        credentialStatus = true;
-#endif
-
-        returnStatus = ( credentialStatus == true ) ? EXIT_SUCCESS : EXIT_FAILURE;
-
-        if( returnStatus == EXIT_FAILURE )
-        {
-            LogError( ( "Failed to get temporary credentials from AWS IoT CREDENTIALS PROVIDER %s.",
-                        serverHost ) );
-        }
-
-        /* End the TLS session, then close the TCP connection. */
-        ( void ) Openssl_Disconnect( &networkContext );
+        pPath = AWS_S3_URI_PATH;
 
         if( returnStatus == EXIT_SUCCESS )
         {
-
-            serverHostLength = strlen( AWS_S3_ENDPOINT );
-            memcpy( serverHost, AWS_S3_ENDPOINT, serverHostLength );
-            serverHost[ serverHostLength ] = '\0';
-
-            /* Define the transport interface. */
-            if( returnStatus == EXIT_SUCCESS )
-            {
-                ( void ) memset( &transportInterface, 0, sizeof( transportInterface ) );
-                transportInterface.recv = Openssl_Recv;
-                transportInterface.send = Openssl_Send;
-                transportInterface.pNetworkContext = &networkContext;
-            }
-
-            /******************** Download S3 Object File. **********************/
-
-            pPath = AWS_S3_URI_PATH;
-
-            if( returnStatus == EXIT_SUCCESS )
-            {
-                ret = downloadS3ObjectFile( &transportInterface,
-                                            pPath );
-                returnStatus = ( ret == true ) ? EXIT_SUCCESS : EXIT_FAILURE;
-                break;
-            }
-
-            /************************** Disconnect. *****************************/
-
-            /* End the TLS session, then close the TCP connection. */
-            ( void ) Openssl_Disconnect( &networkContext );
+            ret = downloadS3ObjectFile( &transportInterface,
+                                        pPath );
+            returnStatus = ( ret == true ) ? EXIT_SUCCESS : EXIT_FAILURE;
         }
-
-        /******************* Retry in case of failure. **********************/
-
-        /* Increment the demo run count. */
-        demoRunCount++;
-
-        if( returnStatus == EXIT_SUCCESS )
-        {
-            LogInfo( ( "Demo iteration %d is successful.", demoRunCount ) );
-        }
-        /* Attempt to retry a failed iteration of demo for up to #HTTP_MAX_DEMO_LOOP_COUNT times. */
-        else if( demoRunCount < HTTP_MAX_DEMO_LOOP_COUNT )
-        {
-            LogWarn( ( "Demo iteration %d failed. Retrying...", demoRunCount ) );
-            sleep( DELAY_BETWEEN_DEMO_RETRY_ITERATIONS_S );
-        }
-        /* Failed all #HTTP_MAX_DEMO_LOOP_COUNT demo iterations. */
-        else
-        {
-            LogError( ( "All %d demo iterations failed.", HTTP_MAX_DEMO_LOOP_COUNT ) );
-            break;
-        }
-    } while( returnStatus != EXIT_SUCCESS );
+    }
 
     if( returnStatus == EXIT_SUCCESS )
     {
