@@ -1406,7 +1406,7 @@ static bool getS3ObjectFileSize( size_t * pFileSize,
     sigv4HttpParams.pHttpMethod = requestInfo.pMethod;
     sigv4HttpParams.httpMethodLen = requestInfo.methodLen;
     /* None of the requests parameters below are pre-canonicalized */
-    sigv4HttpParams.flags = 0;
+    sigv4HttpParams.flags = SIGV4_HTTP_PAYLOAD_IS_UNSIGNED;
     sigv4HttpParams.pPath = requestInfo.pPath;
     sigv4HttpParams.pathLen = requestInfo.pathLen;
     sigv4HttpParams.pQuery = canonical_queries;
