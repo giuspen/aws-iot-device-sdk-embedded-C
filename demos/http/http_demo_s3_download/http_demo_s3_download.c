@@ -988,7 +988,7 @@ static bool getS3ObjectFileSize( size_t * pFileSize,
     getHeaderStartLocFromHttpRequest( requestHeaders, &pHeaders, &headersLen );
 
     // https://docs.aws.amazon.com/AmazonS3/latest/API/sigv4-query-string-auth.html
-    char canonical_queries[3000] = "";
+    char canonical_queries[4096] = "";
     strcat(canonical_queries, "X-Amz-Algorithm=");
     strcat(canonical_queries, SIGV4_AWS4_HMAC_SHA256);
     strcat(canonical_queries, "&X-Amz-Credential=");
@@ -1006,7 +1006,7 @@ static bool getS3ObjectFileSize( size_t * pFileSize,
     strcat(canonical_queries, pSecurityToken);
     strcat(canonical_queries, "&X-Amz-SignedHeaders=host");
 
-    LogInfo( ( "canonical_queries (%zu) = \n%s", strlen(canonical_queries), canonical_queries ) );
+    //LogInfo( ( "canonical_queries (%zu) = \n%s", strlen(canonical_queries), canonical_queries ) );
 
     /* Setup the HTTP parameters. */
     sigv4HttpParams.pHttpMethod = requestInfo.pMethod;
@@ -1037,7 +1037,33 @@ static bool getS3ObjectFileSize( size_t * pFileSize,
         }
     }
 
-    LogInfo( ( "pSigv4Auth = \n%s", pSigv4Auth ) );
+    //LogInfo( ( "pSigv4Auth = \n%s", pSigv4Auth ) );
+
+    char ota_temp_url[4096] = "https://" \
+                          AWS_S3_ENDPOINT \
+                          AWS_S3_URI_PATH \
+                          "?";
+    strcat(ota_temp_url, "X-Amz-Security-Token=");
+    strncat(ota_temp_url, pSecurityToken, securityTokenLen);
+    strcat(ota_temp_url, "&X-Amz-Algorithm=");
+    strcat(ota_temp_url, SIGV4_AWS4_HMAC_SHA256);
+    strcat(ota_temp_url, "&X-Amz-Date=");
+    strncat(ota_temp_url, pDateISO8601, SIGV4_ISO_STRING_LEN);
+    strcat(ota_temp_url, "&X-Amz-SignedHeaders=host");
+    strcat(ota_temp_url, "&X-Amz-Expires=3600");
+    strcat(ota_temp_url, "&X-Amz-Credential=");
+    {
+        char* pchar_start = strstr(pSigv4Auth, " Credential=");
+        if (pchar_start) {
+            char* pchar_end = strstr(pchar_start, ",");
+            if (pchar_end) {
+                strncat(ota_temp_url, pchar_start+12, pchar_end-pchar_start-12);
+            }
+        }
+    }
+    strcat(ota_temp_url, "&X-Amz-Signature=");
+    strncat(ota_temp_url, signature, signatureLen);
+    LogInfo( ( "ota_temp_url=\n%s", ota_temp_url ) );
 
     return returnStatus;
 }
@@ -1127,7 +1153,7 @@ int main( int argc,
     credentialResponse.pBuffer = pAwsIotHttpBuffer;
     credentialResponse.bufferLen = CREDENTIAL_BUFFER_LENGTH;
 
-#if 1
+#if 0
     credentialStatus = getTemporaryCredentials( &transportInterface, pDateISO8601, sizeof( pDateISO8601 ), &credentialResponse, &sigvCreds );
 #else
     sigvCreds.pAccessKeyId = "ASIAVBKNXEL5KM7WKF5J";
