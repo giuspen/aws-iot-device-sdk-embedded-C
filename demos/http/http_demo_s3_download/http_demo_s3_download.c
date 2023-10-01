@@ -1283,7 +1283,7 @@ static bool getS3ObjectFileSize( size_t * pFileSize,
     /* Set "Connection" HTTP header to "keep-alive" so that multiple requests
      * can be sent over the same established TCP connection. This is done in
      * order to download the file in parts. */
-    requestInfo.reqFlags = HTTP_REQUEST_KEEP_ALIVE_FLAG;
+    requestInfo.reqFlags = 0u;
 
     /* Set the buffer used for storing request headers. */
     requestHeaders.pBuffer = userBuffer;
@@ -1305,12 +1305,12 @@ static bool getS3ObjectFileSize( size_t * pFileSize,
                     HTTPClient_strerror( httpStatus ) ) );
         returnStatus = false;
     }
-
+#if 0
     /* Get the hash of the payload. */
     sha256( ( const char * ) S3_REQUEST_EMPTY_PAYLOAD, 0, pPayloadHashDigest );
     lowercaseHexEncode( ( const char * ) pPayloadHashDigest, SHA256_HASH_DIGEST_LENGTH, hexencoded );
 
-#if 0
+
     if( returnStatus == true )
     {
         /* Add the sigv4 required headers to the request. */
@@ -1409,7 +1409,6 @@ static bool getS3ObjectFileSize( size_t * pFileSize,
     sigv4HttpParams.flags = 0;
     sigv4HttpParams.pPath = requestInfo.pPath;
     sigv4HttpParams.pathLen = requestInfo.pathLen;
-    /* AWS S3 request does not require any Query parameters. */
     sigv4HttpParams.pQuery = canonical_queries;
     sigv4HttpParams.queryLen = strlen(canonical_queries);
     sigv4HttpParams.pHeaders = pHeaders;
@@ -1434,7 +1433,6 @@ static bool getS3ObjectFileSize( size_t * pFileSize,
 
     LogInfo( ( "pSigv4Auth = \n%s", pSigv4Auth ) );
 
-    LogInfo( ( "Signature = %s", signature ) );
     return returnStatus;
 
     /* Add the authorization header to the HTTP request headers. */
@@ -1676,6 +1674,10 @@ int main( int argc,
                 LogError( ( "Failed to connect to AWS S3 HTTP server %s.",
                             serverHost ) );
             }
+#else
+            serverHostLength = strlen( AWS_S3_ENDPOINT );
+            memcpy( serverHost, AWS_S3_ENDPOINT, serverHostLength );
+            serverHost[ serverHostLength ] = '\0';
 #endif
             /* Define the transport interface. */
             if( returnStatus == EXIT_SUCCESS )
