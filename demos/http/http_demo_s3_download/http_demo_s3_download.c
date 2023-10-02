@@ -1005,8 +1005,7 @@ static bool getS3ObjectFileSize( size_t * pFileSize,
     strcat(canonical_queries, "&X-Amz-Security-Token=");
     strcat(canonical_queries, pSecurityToken);
     strcat(canonical_queries, "&X-Amz-SignedHeaders=host");
-
-    //LogInfo( ( "canonical_queries (%zu) = \n%s", strlen(canonical_queries), canonical_queries ) );
+    const size_t len_canonical_queries = strlen(canonical_queries);
 
     /* Setup the HTTP parameters. */
     sigv4HttpParams.pHttpMethod = requestInfo.pMethod;
@@ -1039,31 +1038,25 @@ static bool getS3ObjectFileSize( size_t * pFileSize,
 
     //LogInfo( ( "pSigv4Auth = \n%s", pSigv4Auth ) );
 
-    char ota_temp_url[4096] = "https://" \
-                          AWS_S3_ENDPOINT \
-                          AWS_S3_URI_PATH \
-                          "?";
-    strcat(ota_temp_url, "X-Amz-Security-Token=");
-    strncat(ota_temp_url, pSecurityToken, securityTokenLen);
-    strcat(ota_temp_url, "&X-Amz-Algorithm=");
-    strcat(ota_temp_url, SIGV4_AWS4_HMAC_SHA256);
-    strcat(ota_temp_url, "&X-Amz-Date=");
-    strncat(ota_temp_url, pDateISO8601, SIGV4_ISO_STRING_LEN);
-    strcat(ota_temp_url, "&X-Amz-SignedHeaders=host");
-    strcat(ota_temp_url, "&X-Amz-Expires=3600");
-    strcat(ota_temp_url, "&X-Amz-Credential=");
+    char ota_temp_url[4096] = "https://" AWS_S3_ENDPOINT AWS_S3_URI_PATH "?";
+    size_t encodedLen = sizeof(ota_temp_url) - strlen(ota_temp_url);
+    returnStatus = SigV4_EncodeURI( canonical_queries,
+                                    len_canonical_queries,
+                                    ota_temp_url + strlen(ota_temp_url),
+                                    &encodedLen,
+                                    true/* encode slash */,
+                                    false/* do not double encode equal */ );
+
+    if( returnStatus == SigV4Success )
     {
-        char* pchar_start = strstr(pSigv4Auth, " Credential=");
-        if (pchar_start) {
-            char* pchar_end = strstr(pchar_start, ",");
-            if (pchar_end) {
-                strncat(ota_temp_url, pchar_start+12, pchar_end-pchar_start-12);
-            }
-        }
+        strcat(ota_temp_url, "&X-Amz-Signature=");
+        strncat(ota_temp_url, signature, signatureLen);
+        LogInfo( ( "ota_temp_url=\n%s", ota_temp_url ) );
     }
-    strcat(ota_temp_url, "&X-Amz-Signature=");
-    strncat(ota_temp_url, signature, signatureLen);
-    LogInfo( ( "ota_temp_url=\n%s", ota_temp_url ) );
+    else
+    {
+        LogError( ( "SigV4_EncodeURI(%.*s)", (int)len_canonical_queries, canonical_queries ) );
+    }
 
     return returnStatus;
 }
