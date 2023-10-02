@@ -987,18 +987,21 @@ static bool getS3ObjectFileSize( size_t * pFileSize,
      * library and are not required by SigV4 library. */
     getHeaderStartLocFromHttpRequest( requestHeaders, &pHeaders, &headersLen );
 
+    // <your-access-key-id>/<date>/<AWS Region>/<AWS-service>/aws4_request
+    char x_amz_credentials[256] = "";
+    strcat(x_amz_credentials, sigvCreds.pAccessKeyId);
+    strcat(x_amz_credentials, "/");
+    strncat(x_amz_credentials, pDateISO8601, 8);
+    strcat(x_amz_credentials, "/");
+    strcat(x_amz_credentials, AWS_S3_BUCKET_REGION);
+    strcat(x_amz_credentials, "/s3/aws4_request");
+
     // https://docs.aws.amazon.com/AmazonS3/latest/API/sigv4-query-string-auth.html
-    char canonical_queries[4096] = "";
+    char canonical_queries[2048] = "";
     strcat(canonical_queries, "X-Amz-Algorithm=");
     strcat(canonical_queries, SIGV4_AWS4_HMAC_SHA256);
     strcat(canonical_queries, "&X-Amz-Credential=");
-    // <your-access-key-id>/<date>/<AWS Region>/<AWS-service>/aws4_request
-    strcat(canonical_queries, sigvCreds.pAccessKeyId);
-    strcat(canonical_queries, "/");
-    strncat(canonical_queries, pDateISO8601, 8);
-    strcat(canonical_queries, "/");
-    strcat(canonical_queries, AWS_S3_BUCKET_REGION);
-    strcat(canonical_queries, "/s3/aws4_request");
+    strcat(canonical_queries, x_amz_credentials);
     strcat(canonical_queries, "&X-Amz-Date=");
     strcat(canonical_queries, pDateISO8601);
     strcat(canonical_queries, "&X-Amz-Expires=3600");
@@ -1036,27 +1039,40 @@ static bool getS3ObjectFileSize( size_t * pFileSize,
         }
     }
 
-    //LogInfo( ( "pSigv4Auth = \n%s", pSigv4Auth ) );
-
     char ota_temp_url[4096] = "https://" AWS_S3_ENDPOINT AWS_S3_URI_PATH "?";
+    strcat(ota_temp_url, "X-Amz-Algorithm=");
+    strcat(ota_temp_url, SIGV4_AWS4_HMAC_SHA256);
+    strcat(ota_temp_url, "&X-Amz-Credential=");
     size_t encodedLen = sizeof(ota_temp_url) - strlen(ota_temp_url);
-    returnStatus = SigV4_EncodeURI( canonical_queries,
-                                    len_canonical_queries,
+    returnStatus = SigV4_EncodeURI( x_amz_credentials,
+                                    strlen(x_amz_credentials),
                                     ota_temp_url + strlen(ota_temp_url),
                                     &encodedLen,
                                     true/* encode slash */,
                                     false/* do not double encode equal */ );
-
-    if( returnStatus == SigV4Success )
+    if( returnStatus != SigV4Success )
     {
-        strcat(ota_temp_url, "&X-Amz-Signature=");
-        strncat(ota_temp_url, signature, signatureLen);
-        LogInfo( ( "ota_temp_url=\n%s", ota_temp_url ) );
+        LogError( ( "Failed to run SigV4_EncodeURI on '%s'.", x_amz_credentials ) );
     }
-    else
+    strcat(ota_temp_url, "&X-Amz-Date=");
+    strcat(ota_temp_url, pDateISO8601);
+    strcat(ota_temp_url, "&X-Amz-Expires=3600");
+    strcat(ota_temp_url, "&X-Amz-SignedHeaders=host");
+    strcat(ota_temp_url, "&X-Amz-Security-Token=");
+    encodedLen = sizeof(ota_temp_url) - strlen(ota_temp_url);
+    returnStatus = SigV4_EncodeURI( pSecurityToken,
+                                    strlen(pSecurityToken),
+                                    ota_temp_url + strlen(ota_temp_url),
+                                    &encodedLen,
+                                    true/* encode slash */,
+                                    false/* do not double encode equal */ );
+    if( returnStatus != SigV4Success )
     {
-        LogError( ( "SigV4_EncodeURI(%.*s)", (int)len_canonical_queries, canonical_queries ) );
+        LogError( ( "Failed to run SigV4_EncodeURI on '%s'.", pSecurityToken ) );
     }
+    strcat(ota_temp_url, "&X-Amz-Signature=");
+    strncat(ota_temp_url, signature, signatureLen);
+    LogInfo( ( "ota_temp_url=\n%s", ota_temp_url ) );
 
     return returnStatus;
 }
