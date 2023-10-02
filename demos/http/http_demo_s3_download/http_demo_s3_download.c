@@ -421,6 +421,11 @@ static bool getS3ObjectFileSize( size_t * pFileSize,
                                  const char * pHost,
                                  size_t hostLen,
                                  const char * pPath );
+static bool getS3ObjectFileSign( size_t * pFileSize,
+                                 const TransportInterface_t * pTransportInterface,
+                                 const char * pHost,
+                                 size_t hostLen,
+                                 const char * pPath );
 
 /**
  * @brief Parse the credentials retrieved from AWS IOT Credential Provider using coreJSON API.
@@ -642,7 +647,7 @@ static bool getTemporaryCredentials( TransportInterface_t * transportInterface,
         /* Parse the credentials received in the response. */
         jsonStatus = parseCredentials( response, sigvCreds );
 
-        LogDebug( ( "AWS IoT credential provider response: %.*s.",
+        LogInfo( ( "AWS IoT credential provider response: %.*s.",
                     ( int32_t ) response->bufferLen, response->pBuffer ) );
 
         if( jsonStatus != JSONSuccess )
@@ -1228,7 +1233,184 @@ static bool downloadS3ObjectFile( const TransportInterface_t * pTransportInterfa
         }
     }
 
+    (void)getS3ObjectFileSign( &fileSize,
+                               pTransportInterface,
+                               serverHost,
+                               serverHostLength,
+                               pPath );
+
     return( ( returnStatus == true ) && ( httpStatus == HTTPSuccess ) );
+}
+
+/*-----------------------------------------------------------*/
+
+static bool getS3ObjectFileSign( size_t * pFileSize,
+                                 const TransportInterface_t * pTransportInterface,
+                                 const char * pHost,
+                                 size_t hostLen,
+                                 const char * pPath )
+{
+    bool returnStatus = true;
+    HTTPStatus_t httpStatus = HTTPSuccess;
+    HTTPRequestHeaders_t requestHeaders;
+    HTTPRequestInfo_t requestInfo;
+    HTTPResponse_t response;
+    uint8_t userBuffer[ USER_BUFFER_LENGTH ];
+
+    /* The location of the file size in contentRangeValStr. */
+    char * pFileSizeStr = NULL;
+
+    /* String to store the Content-Range header value. */
+    char * contentRangeValStr = NULL;
+    size_t contentRangeValStrLength = 0;
+
+    SigV4Status_t sigv4Status = SigV4Success;
+    SigV4HttpParameters_t sigv4HttpParams;
+
+    char * pHeaders = NULL;
+    size_t headersLen = 0;
+
+    /* Store Signature used in AWS HTTP requests generated using SigV4 library. */
+    char * signature = NULL;
+    size_t signatureLen = 0;
+
+    assert( pHost != NULL );
+    assert( pPath != NULL );
+
+    /* Initialize all HTTP Client library API structs to 0. */
+    ( void ) memset( &requestHeaders, 0, sizeof( requestHeaders ) );
+    ( void ) memset( &requestInfo, 0, sizeof( requestInfo ) );
+    ( void ) memset( &response, 0, sizeof( response ) );
+
+    /* Initialize the request object. */
+    requestInfo.pHost = pHost;
+    requestInfo.hostLen = hostLen;
+    requestInfo.pMethod = HTTP_METHOD_GET;
+    requestInfo.methodLen = sizeof( HTTP_METHOD_GET ) - 1;
+    requestInfo.pPath = pPath;
+    requestInfo.pathLen = strlen( pPath );
+
+    /* Set "Connection" HTTP header to "keep-alive" so that multiple requests
+     * can be sent over the same established TCP connection. This is done in
+     * order to download the file in parts. */
+    requestInfo.reqFlags = 0u;
+
+    /* Set the buffer used for storing request headers. */
+    requestHeaders.pBuffer = userBuffer;
+    requestHeaders.bufferLen = USER_BUFFER_LENGTH;
+
+    /* Initialize the response object. The same buffer used for storing request
+     * headers is reused here. */
+    response.pBuffer = userBuffer;
+    response.bufferLen = USER_BUFFER_LENGTH;
+
+    LogInfo( ( "Getting presigned URL..." ) );
+
+    httpStatus = HTTPClient_InitializeRequestHeaders( &requestHeaders,
+                                                      &requestInfo );
+
+    if( httpStatus != HTTPSuccess )
+    {
+        LogError( ( "Failed to initialize HTTP request headers: Error=%s.",
+                    HTTPClient_strerror( httpStatus ) ) );
+        returnStatus = false;
+    }
+
+    /* Move request header pointer past the initial headers which are added by coreHTTP
+     * library and are not required by SigV4 library. */
+    getHeaderStartLocFromHttpRequest( requestHeaders, &pHeaders, &headersLen );
+
+    // <your-access-key-id>/<date>/<AWS Region>/<AWS-service>/aws4_request
+    char x_amz_credentials[256] = "";
+    strncat(x_amz_credentials, sigvCreds.pAccessKeyId, sigvCreds.accessKeyIdLen);
+    strcat(x_amz_credentials, "/");
+    strncat(x_amz_credentials, pDateISO8601, 8);
+    strcat(x_amz_credentials, "/");
+    strcat(x_amz_credentials, AWS_S3_BUCKET_REGION);
+    strcat(x_amz_credentials, "/s3/aws4_request");
+    //LogInfo( ( "x_amz_credentials = '%s'", x_amz_credentials ) );
+
+    // https://docs.aws.amazon.com/AmazonS3/latest/API/sigv4-query-string-auth.html
+    char canonical_queries[2048] = "";
+    strcat(canonical_queries, "X-Amz-Algorithm=");
+    strcat(canonical_queries, SIGV4_AWS4_HMAC_SHA256);
+    strcat(canonical_queries, "&X-Amz-Credential=");
+    strcat(canonical_queries, x_amz_credentials);
+    strcat(canonical_queries, "&X-Amz-Date=");
+    strcat(canonical_queries, pDateISO8601);
+    strcat(canonical_queries, "&X-Amz-Expires=3600");
+    strcat(canonical_queries, "&X-Amz-Security-Token=");
+    strcat(canonical_queries, pSecurityToken);
+    strcat(canonical_queries, "&X-Amz-SignedHeaders=host");
+
+    /* Setup the HTTP parameters. */
+    sigv4HttpParams.pHttpMethod = requestInfo.pMethod;
+    sigv4HttpParams.httpMethodLen = requestInfo.methodLen;
+    /* None of the requests parameters below are pre-canonicalized */
+    sigv4HttpParams.flags = SIGV4_HTTP_PAYLOAD_IS_UNSIGNED;
+    sigv4HttpParams.pPath = requestInfo.pPath;
+    sigv4HttpParams.pathLen = requestInfo.pathLen;
+    sigv4HttpParams.pQuery = canonical_queries;
+    sigv4HttpParams.queryLen = strlen(canonical_queries);
+    sigv4HttpParams.pHeaders = pHeaders;
+    sigv4HttpParams.headersLen = headersLen;
+    sigv4HttpParams.pPayload = S3_REQUEST_EMPTY_PAYLOAD;
+    sigv4HttpParams.payloadLen = strlen( S3_REQUEST_EMPTY_PAYLOAD );
+
+    /* Initializing sigv4Params with Http parameters required for the HTTP request. */
+    sigv4Params.pHttpParameters = &sigv4HttpParams;
+
+    if( returnStatus == true )
+    {
+        /* Generate HTTP Authorization header using SigV4_GenerateHTTPAuthorization API. */
+        sigv4Status = SigV4_GenerateHTTPAuthorization( &sigv4Params, pSigv4Auth, &sigv4AuthLen, &signature, &signatureLen );
+
+        if( sigv4Status != SigV4Success )
+        {
+            LogError( ( "Failed to generate HTTP AUTHORIZATION Header. " ) );
+            returnStatus = false;
+        }
+    }
+
+    if( returnStatus == true )
+    {
+        char ota_temp_url[4096] = "https://" AWS_S3_ENDPOINT AWS_S3_URI_PATH "?";
+        strcat(ota_temp_url, "X-Amz-Algorithm=");
+        strcat(ota_temp_url, SIGV4_AWS4_HMAC_SHA256);
+        strcat(ota_temp_url, "&X-Amz-Credential=");
+        size_t encodedLen = sizeof(ota_temp_url) - strlen(ota_temp_url);
+        returnStatus = SigV4_EncodeURI( x_amz_credentials,
+                                        strlen(x_amz_credentials),
+                                        ota_temp_url + strlen(ota_temp_url),
+                                        &encodedLen,
+                                        true/* encode slash */,
+                                        false/* do not double encode equal */ );
+        if( returnStatus != SigV4Success )
+        {
+            LogError( ( "Failed to run SigV4_EncodeURI on '%s'.", x_amz_credentials ) );
+        }
+        strcat(ota_temp_url, "&X-Amz-Date=");
+        strcat(ota_temp_url, pDateISO8601);
+        strcat(ota_temp_url, "&X-Amz-Expires=3600");
+        strcat(ota_temp_url, "&X-Amz-SignedHeaders=host");
+        strcat(ota_temp_url, "&X-Amz-Security-Token=");
+        encodedLen = sizeof(ota_temp_url) - strlen(ota_temp_url);
+        returnStatus = SigV4_EncodeURI( pSecurityToken,
+                                        strlen(pSecurityToken),
+                                        ota_temp_url + strlen(ota_temp_url),
+                                        &encodedLen,
+                                        true/* encode slash */,
+                                        false/* do not double encode equal */ );
+        if( returnStatus != SigV4Success )
+        {
+            LogError( ( "Failed to run SigV4_EncodeURI on '%s'.", pSecurityToken ) );
+        }
+        strcat(ota_temp_url, "&X-Amz-Signature=");
+        strncat(ota_temp_url, signature, signatureLen);
+        LogInfo( ( "ota_temp_url=\n%s", ota_temp_url ) );
+    }
+
+    return returnStatus;
 }
 
 /*-----------------------------------------------------------*/

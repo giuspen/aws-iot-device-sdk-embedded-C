@@ -68,7 +68,7 @@
 /**
  * @brief Query parameters used in requests to S3.
  */
-#define SIGV4_MAX_QUERY_PAIR_COUNT        1U
+#define SIGV4_MAX_QUERY_PAIR_COUNT        10U
 
 /**
  * @brief Maximum of all the block sizes of hashing algorithms used in the demo for the
