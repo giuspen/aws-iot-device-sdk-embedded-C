@@ -1007,7 +1007,7 @@ static bool getS3ObjectFileSize( size_t * pFileSize,
     strcat(canonical_queries, pDateISO8601);
     strcat(canonical_queries, "&X-Amz-Expires=3600");
     strcat(canonical_queries, "&X-Amz-Security-Token=");
-    strcat(canonical_queries, pSecurityToken);
+    strncat(canonical_queries, pSecurityToken, securityTokenLen);
     strcat(canonical_queries, "&X-Amz-SignedHeaders=host");
 
     /* Setup the HTTP parameters. */
@@ -1063,7 +1063,7 @@ static bool getS3ObjectFileSize( size_t * pFileSize,
         strcat(ota_temp_url, "&X-Amz-Security-Token=");
         encodedLen = sizeof(ota_temp_url) - strlen(ota_temp_url);
         returnStatus = SigV4_EncodeURI( pSecurityToken,
-                                        strlen(pSecurityToken),
+                                        securityTokenLen,
                                         ota_temp_url + strlen(ota_temp_url),
                                         &encodedLen,
                                         true/* encode slash */,
