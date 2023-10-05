@@ -655,7 +655,7 @@ static JSONStatus_t parseCredentials( HTTPResponse_t * response,
 
         if( jsonStatus != JSONSuccess )
         {
-            LogError( ( "Error parsing accessKeyId in the credentials." ) );
+            LogError( ( "Error parsing %s in the credentials.\n%s", CREDENTIALS_RESPONSE_ACCESS_KEY_ID_KEY, response->pBody ) );
         }
     }
 
@@ -671,7 +671,7 @@ static JSONStatus_t parseCredentials( HTTPResponse_t * response,
 
         if( jsonStatus != JSONSuccess )
         {
-            LogError( ( "Error parsing secretAccessKey in the credentials." ) );
+            LogError( ( "Error parsing %s in the credentials.\n%s", CREDENTIALS_RESPONSE_SECRET_ACCESS_KEY, response->pBody ) );
         }
     }
 
@@ -687,7 +687,7 @@ static JSONStatus_t parseCredentials( HTTPResponse_t * response,
 
         if( jsonStatus != JSONSuccess )
         {
-            LogError( ( "Error parsing sessionToken in the credentials." ) );
+            LogError( ( "Error parsing %s in the credentials.\n%s", CREDENTIALS_RESPONSE_SESSION_TOKEN_KEY, response->pBody ) );
         }
     }
 
@@ -703,7 +703,7 @@ static JSONStatus_t parseCredentials( HTTPResponse_t * response,
 
         if( jsonStatus != JSONSuccess )
         {
-            LogError( ( "Error parsing expiration date in the credentials." ) );
+            LogError( ( "Error parsing %s in the credentials.\n%s", CREDENTIALS_RESPONSE_EXPIRATION_DATE_KEY, response->pBody ) );
         }
         else
         {
@@ -957,10 +957,9 @@ static bool getS3ObjectFileSize( size_t * pFileSize,
     requestInfo.pPath = pPath;
     requestInfo.pathLen = strlen( pPath );
 
-    /* Set "Connection" HTTP header to "keep-alive" so that multiple requests
-     * can be sent over the same established TCP connection. This is done in
-     * order to download the file in parts. */
-    requestInfo.reqFlags = 0u;
+    /* Set "Connection" HTTP header to "no-user-agent"
+     * needed for the presigned URL. */
+    requestInfo.reqFlags = HTTP_REQUEST_NO_USER_AGENT_FLAG;
 
     /* Set the buffer used for storing request headers. */
     requestHeaders.pBuffer = userBuffer;
@@ -1004,7 +1003,7 @@ static bool getS3ObjectFileSize( size_t * pFileSize,
     strcat(canonical_queries, "&X-Amz-Credential=");
     strcat(canonical_queries, x_amz_credentials);
     strcat(canonical_queries, "&X-Amz-Date=");
-    strcat(canonical_queries, pDateISO8601);
+    strncat(canonical_queries, pDateISO8601, SIGV4_ISO_STRING_LEN);
     strcat(canonical_queries, "&X-Amz-Expires=3600");
     strcat(canonical_queries, "&X-Amz-Security-Token=");
     strncat(canonical_queries, pSecurityToken, securityTokenLen);
@@ -1057,7 +1056,7 @@ static bool getS3ObjectFileSize( size_t * pFileSize,
             LogError( ( "Failed to run SigV4_EncodeURI on '%s'.", x_amz_credentials ) );
         }
         strcat(ota_temp_url, "&X-Amz-Date=");
-        strcat(ota_temp_url, pDateISO8601);
+        strncat(ota_temp_url, pDateISO8601, SIGV4_ISO_STRING_LEN);
         strcat(ota_temp_url, "&X-Amz-Expires=3600");
         strcat(ota_temp_url, "&X-Amz-SignedHeaders=host");
         strcat(ota_temp_url, "&X-Amz-Security-Token=");
